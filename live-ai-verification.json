@@ -1,0 +1,14 @@
+{
+  "analyze": {
+    "http_status": 429,
+    "response": {
+      "detail": "OpenAI rate or quota limit reached. Check billing or retry later."
+    }
+  },
+  "tests": {
+    "http_status": 429,
+    "response": {
+      "detail": "OpenAI rate or quota limit reached."
+    }
+  }
+}
