@@ -188,7 +188,7 @@ def create_app(data_dir=None, wheelhouse=None):
     def analyze_report(report_id: UUID):
         report = read_report(report_id)
         if not configuration()["configured"]:
-            raise HTTPException(503, "Set OPENAI_API_KEY in the server environment, then restart the API.")
+            raise HTTPException(503, "Set " + configuration()["key_variable"] + " in .env and restart the API.")
         if not analysis_slot.acquire(blocking=False):
             raise HTTPException(429, "Another report is being analyzed. Wait for it to finish.")
         analysis_id, started, created = str(uuid4()), time.monotonic(), now()
@@ -233,7 +233,7 @@ def create_app(data_dir=None, wheelhouse=None):
                 for key in ("expected_behavior", "actual_behavior")):
             raise HTTPException(409, "Save a review with expected and actual behavior before generating a test.")
         if not configuration()["configured"]:
-            raise HTTPException(503, "Configure OPENAI_API_KEY and restart the API.")
+            raise HTTPException(503, "Set " + configuration()["key_variable"] + " in .env and restart the API.")
         if not analysis_slot.acquire(blocking=False):
             raise HTTPException(429, "Another AI request is running. Wait for it to finish.")
         test_id, started, created = str(uuid4()), time.monotonic(), now()

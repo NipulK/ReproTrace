@@ -75,9 +75,10 @@ async function loadConfig() {
   try {
     aiConfig=await request('/ai/config');
     byId('ai-config').textContent=aiConfig.configured
-      ? `OpenAI · ${aiConfig.model}`
-      : 'OpenAI is not configured. Add OPENAI_API_KEY to your local .env and restart the server.';
+      ? `${aiConfig.provider === 'gemini' ? 'Gemini' : 'OpenAI'} · ${aiConfig.model}`
+      : `${aiConfig.provider} is not configured. Add ${aiConfig.key_variable} to your local .env and restart the server.`;
     byId('analyze').disabled=!aiConfig.configured || analyzing || generating;
+    byId('ai-disclosure').textContent=`Analyze sends this saved report’s title and body to ${aiConfig.provider === 'gemini' ? 'Google Gemini' : 'OpenAI'}. Review notes are excluded. Suggestions require review; exact quotes do not guarantee correct interpretation.`;
     updateGenerateButton();
   } catch(error) {byId('ai-config').textContent='Could not read AI configuration.';}
 }
@@ -152,7 +153,7 @@ byId('analyze').addEventListener('click',async()=>{
   if(!current || analyzing)return;
   const id=current.id,token=revision;
   analyzing=true;byId('analyze').disabled=true;updateGenerateButton();byId('intake-error').hidden=true;
-  byId('analysis-status').textContent='Analyzing the saved report with OpenAI… This can take up to 90 seconds.';
+  byId('analysis-status').textContent=`Analyzing the saved report with ${aiConfig.provider}… This can take up to 90 seconds.`;
   try {
     const analysis=await request('/reports/'+id+'/analyze',{method:'POST'});
     if(token===revision && current.id===id)renderAnalysis(analysis);

@@ -5,6 +5,7 @@ from typing import Literal, Optional
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
+from gemini import request_json, GeminiError
 
 PROMPT_VERSION = "report-extraction-v1"
 PROMPT = """Extract a bug report into the supplied JSON schema.
@@ -53,8 +54,14 @@ class ExtractionError(Exception):
 
 
 def configuration():
-    return {"provider": "openai", "model": os.getenv("WORKBENCH_AI_MODEL", "gpt-4o-mini"),
-            "configured": bool(os.getenv("OPENAI_API_KEY", "").strip()),
+    provider = os.getenv("WORKBENCH_AI_PROVIDER", "openai").strip().lower()
+    supported = provider in ("openai", "gemini")
+    key_name = "GEMINI_API_KEY" if provider == "gemini" else "OPENAI_API_KEY"
+    model = (os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite") if provider == "gemini"
+             else os.getenv("OPENAI_MODEL", "gpt-4o-mini"))
+    return {"provider": provider, "model": os.getenv("WORKBENCH_AI_MODEL") or model,
+            "configured": supported and bool(os.getenv(key_name, "").strip()),
+            "key_variable": key_name, "supported": supported,
             "prompt_version": PROMPT_VERSION,
             "data_sent": "Saved report title and body only; manual review notes are excluded."}
 
@@ -80,7 +87,18 @@ def validate_extraction(value, snapshot):
 def analyze(snapshot):
     config = configuration()
     if not config["configured"]:
-        raise ExtractionError("Set OPENAI_API_KEY in the server environment, then restart the API.", 503)
+        raise ExtractionError("Set " + config["key_variable"] + " in .env and restart the API.", 503)
+    if config["provider"] == "gemini":
+        try:
+            result = request_json(config["model"], PROMPT,
+                {"title": snapshot["title"], "body": snapshot["body"]},
+                Extraction.model_json_schema(), 5000)
+            validated = validate_extraction(result.pop("data"), snapshot)
+            return {"suggestions": validated, **result, "prompt_version": PROMPT_VERSION}
+        except GeminiError as exc:
+            raise ExtractionError(str(exc), exc.status_code)
+        except ValueError:
+            raise ExtractionError("Gemini output failed schema or source-quote validation. No suggestions were applied.")
     payload = {
         "model": config["model"], "store": False, "max_output_tokens": 5000,
         "instructions": PROMPT,

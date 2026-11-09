@@ -8,6 +8,7 @@ from typing import Literal, Optional
 import httpx
 from pydantic import Field
 from extraction import StrictModel, ExtractionError, configuration
+from gemini import request_json, GeminiError
 
 PROMPT_VERSION = "reproduction-generation-v1"
 PROMPT = """Produce one minimal pytest regression test for the saved reviewed bug report.
@@ -79,10 +80,20 @@ def validate_draft(value):
 def generate(report):
     config = configuration()
     if not config["configured"]:
-        raise ExtractionError("Set OPENAI_API_KEY in the server environment and restart the API.", 503)
+        raise ExtractionError("Set " + config["key_variable"] + " in .env and restart the API.", 503)
     frozen_input = {"repository": report["snapshot"]["repository"],
                     "original_report": {key: report["snapshot"][key] for key in ("title", "body")},
                     "saved_review": report["review"]}
+    if config["provider"] == "gemini":
+        try:
+            result = request_json(config["model"], PROMPT, frozen_input, TestDraft.model_json_schema(), 6500)
+            draft = validate_draft(result.pop("data"))
+            return {"draft": draft, **result, "prompt_version": PROMPT_VERSION, "executed": False,
+                    "validation": "syntax_and_structure_checked" if draft["code"] else "needs_information"}
+        except GeminiError as exc:
+            raise ExtractionError(str(exc), exc.status_code)
+        except (ValueError, SyntaxError):
+            raise ExtractionError("Gemini test draft failed syntax or structure validation. No code was executed.")
     try:
         response = httpx.post("https://api.openai.com/v1/responses", timeout=90,
             follow_redirects=False,
