@@ -1,0 +1,72 @@
+[
+  {
+    "case": "werkzeug-2842",
+    "release_role": "buggy",
+    "exit_code": 1,
+    "stdout": "Package: Werkzeug Version: 3.0.1\n",
+    "stderr": "Traceback (most recent call last):\n  File \"/Users/nipulkanishka/.codex/.chatgpt-projects/g-p-6a67a38132c481918f86b407791ed16d/bug-reproduction-starter/cases/reproduce.py\", line 81, in <module>\n    reproduce()\n  File \"/Users/nipulkanishka/.codex/.chatgpt-projects/g-p-6a67a38132c481918f86b407791ed16d/bug-reproduction-starter/cases/reproduce.py\", line 8, in multidict_none\n    value = MultiDict([(\"quantity\", None)]).get(\"quantity\", default=7, type=int)\n  File \"/private/tmp/bw-w301/werkzeug/datastructures/structures.py\", line 82, in get\n    rv = type(rv)\nTypeError: int() argument must be a string, a bytes-like object or a number, not 'NoneType'\n"
+  },
+  {
+    "case": "werkzeug-2842",
+    "release_role": "fixed",
+    "exit_code": 0,
+    "stdout": "Package: Werkzeug Version: 3.0.2\nObserved: 7\nPASS: corrected behavior observed\n",
+    "stderr": ""
+  },
+  {
+    "case": "werkzeug-2834",
+    "release_role": "buggy",
+    "exit_code": 1,
+    "stdout": "Package: Werkzeug Version: 3.0.1\nObserved status: 308\n",
+    "stderr": "Traceback (most recent call last):\n  File \"/Users/nipulkanishka/.codex/.chatgpt-projects/g-p-6a67a38132c481918f86b407791ed16d/bug-reproduction-starter/cases/reproduce.py\", line 81, in <module>\n    reproduce()\n  File \"/Users/nipulkanishka/.codex/.chatgpt-projects/g-p-6a67a38132c481918f86b407791ed16d/bug-reproduction-starter/cases/reproduce.py\", line 27, in double_slash\n    assert code == 404\nAssertionError\n"
+  },
+  {
+    "case": "werkzeug-2834",
+    "release_role": "fixed",
+    "exit_code": 0,
+    "stdout": "Package: Werkzeug Version: 3.0.2\nObserved status: 404\nPASS: corrected behavior observed\n",
+    "stderr": ""
+  },
+  {
+    "case": "werkzeug-2980",
+    "release_role": "buggy",
+    "exit_code": 1,
+    "stdout": "Package: Werkzeug Version: 3.0.6\nObserved: 'invalid'\n",
+    "stderr": "Traceback (most recent call last):\n  File \"/Users/nipulkanishka/.codex/.chatgpt-projects/g-p-6a67a38132c481918f86b407791ed16d/bug-reproduction-starter/cases/reproduce.py\", line 81, in <module>\n    reproduce()\n  File \"/Users/nipulkanishka/.codex/.chatgpt-projects/g-p-6a67a38132c481918f86b407791ed16d/bug-reproduction-starter/cases/reproduce.py\", line 34, in cache_header\n    assert value is None\nAssertionError\n"
+  },
+  {
+    "case": "werkzeug-2980",
+    "release_role": "fixed",
+    "exit_code": 0,
+    "stdout": "Package: Werkzeug Version: 3.1.0\nObserved: None\nPASS: corrected behavior observed\n",
+    "stderr": ""
+  },
+  {
+    "case": "click-2500",
+    "release_role": "buggy",
+    "exit_code": 1,
+    "stdout": "Package: click Version: 8.1.7\nUsage: command [OPTIONS]\n\nOptions:\n  --name TEXT\n  --help       Show this message and exit.\n\n",
+    "stderr": "Traceback (most recent call last):\n  File \"/Users/nipulkanishka/.codex/.chatgpt-projects/g-p-6a67a38132c481918f86b407791ed16d/bug-reproduction-starter/cases/reproduce.py\", line 81, in <module>\n    reproduce()\n  File \"/Users/nipulkanishka/.codex/.chatgpt-projects/g-p-6a67a38132c481918f86b407791ed16d/bug-reproduction-starter/cases/reproduce.py\", line 47, in empty_default\n    assert '[default: \"\"]' in result.output\nAssertionError\n"
+  },
+  {
+    "case": "click-2500",
+    "release_role": "fixed",
+    "exit_code": 0,
+    "stdout": "Package: click Version: 8.1.8\nUsage: command [OPTIONS]\n\nOptions:\n  --name TEXT  [default: \"\"]\n  --help       Show this message and exit.\n\nPASS: corrected behavior observed\n",
+    "stderr": ""
+  },
+  {
+    "case": "click-2294",
+    "release_role": "buggy",
+    "exit_code": 1,
+    "stdout": "Package: click Version: 8.1.3\n",
+    "stderr": "Traceback (most recent call last):\n  File \"/Users/nipulkanishka/.codex/.chatgpt-projects/g-p-6a67a38132c481918f86b407791ed16d/bug-reproduction-starter/cases/reproduce.py\", line 81, in <module>\n    reproduce()\n  File \"/Users/nipulkanishka/.codex/.chatgpt-projects/g-p-6a67a38132c481918f86b407791ed16d/bug-reproduction-starter/cases/reproduce.py\", line 63, in reused_decorator\n    def second(value):\n  File \"/private/tmp/bw-c813/click/decorators.py\", line 287, in decorator\n    _param_memo(f, ArgumentClass(param_decls, **attrs))\n  File \"/private/tmp/bw-c813/click/core.py\", line 2950, in __init__\n    super().__init__(param_decls, required=required, **attrs)\nTypeError: __init__() got an unexpected keyword argument 'help'\n"
+  },
+  {
+    "case": "click-2294",
+    "release_role": "fixed",
+    "exit_code": 0,
+    "stdout": "Package: click Version: 8.1.4\nObserved: CustomArgument CustomArgument\nPASS: corrected behavior observed\n",
+    "stderr": ""
+  }
+]

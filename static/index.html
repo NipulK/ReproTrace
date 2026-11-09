@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ReproTrace · Experiments</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<header><a class="brand" href="/">⌘ <span>REPROTRACE</span></a><nav><a href="/intake">Report intake</a><span class="local">● Local workspace</span><a href="/docs">API docs ↗</a></nav></header>
+<main>
+<div class="intro"><p class="eyebrow">DEVELOPER TOOLS · 01</p><h1>From bug report<br>to repeatable evidence.</h1><p>Run curated Python regressions. Compare releases.<br>Keep the experiment, not just the conclusion.</p></div>
+<div id="error" class="error" role="alert" hidden></div>
+<div class="layout">
+<aside><section class="panel"><div class="section-title"><span class="number">01</span><h2>Set up an experiment</h2></div>
+<form id="run-form"><label for="case">Regression case</label><select id="case" required disabled><option>Loading cases…</option></select><p id="versions" class="hint"></p>
+<label for="release">Release selection</label><select id="release"><option value="both">Compare buggy + fixed</option><option value="buggy">Buggy release only</option><option value="fixed">Fixed release only</option></select>
+<label for="timeout">Execution timeout <span class="hint">seconds</span></label><input id="timeout" type="number" min="1" max="60" value="30" required>
+<button id="submit" type="submit" disabled>Start reproduction <span>↗</span></button></form>
+<p class="note">Curated fixtures only. Each attempt uses a fresh Python environment.</p></section>
+<section class="panel history"><div class="section-title"><span class="number">02</span><h2>Recent experiments</h2><button class="text-button" id="refresh" aria-label="Refresh run history">↻</button></div><div id="history"><p class="hint">Loading history…</p></div></section></aside>
+<section class="panel evidence"><div class="section-title"><span class="number">03</span><h2>Execution evidence</h2><span id="status" class="badge">No run selected</span></div>
+<div id="empty" class="empty"><div class="empty-icon">⌁</div><h3>A result you can inspect.</h3><p>Start an experiment or select a previous run.<br>Its observations, environment, and logs appear here.</p></div>
+<div id="detail" hidden><div class="run-heading"><h3 id="run-title"></h3><p id="run-id" class="mono"></p><p id="run-time" class="hint"></p></div><p id="progress" role="status" aria-live="polite"></p><div id="results"></div><div id="files-section"><h3 class="small-heading">Evidence files</h3><p class="hint">Download the original scripts, observations, and execution logs.</p><div id="artifacts"></div></div></div>
+</section></div><footer>Evidence before assumptions.<span>Python · Click · Werkzeug</span></footer>
+</main></body></html>
