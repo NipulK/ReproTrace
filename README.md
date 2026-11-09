@@ -20,12 +20,43 @@ Drafts become marked outdated when the saved review changes. A provider failure
 is recorded separately and does not replace a previously successful draft.
 
 Drafts require valid Python syntax, a top-level test_ function and an assert.
-A restrictive import/call filter rejects some obvious side effects. This is NOT
-a sandbox, security guarantee, or validation of correctness: generated drafts
-remain unexecuted and must not be passed to the trusted-fixture CLI. An isolated
-execution worker and human-reviewed test oracle are separate future milestones.
-No endpoint runs generated code. A model can return needs_information with no
-code when the reviewed report is insufficient.
+The static import/call filter is not a sandbox or correctness check. A draft may
+return needs_information with no code when the report is insufficient.
+
+### Run generated tests and inspect logs
+
+After inspecting the generated draft, choose a pinned version profile and click
+Run buggy + fixed. The report page polls progress and shows per-release outcomes,
+pytest counts, build logs, and execution stdout/stderr. It restores recent run
+history when reopened. Save review edits and regenerate before running stale code.
+
+Requires Docker Desktop running in Linux-container mode. There is no host/venv
+fallback for generated code. First execution builds trusted Python 3.11 images
+with allowlisted pinned Click/Werkzeug and pytest packages. AI-suggested packages
+are never installed. Only the generated source file is mounted into each container,
+read-only. The .env, repository, API database and Docker socket are not mounted.
+Generated code runs as a non-root user with network disabled, a read-only root,
+capabilities dropped, no-new-privileges, 256 MB memory, one CPU, a PID limit,
+bounded temporary storage and output, and a 30-second execution deadline.
+Container cleanup occurs after each attempt; images remain cached. Image IDs and
+test SHA-256 are recorded. This is a local development runner, not a hardened
+multi-tenant service. Keep the API on localhost.
+
+POST /tests/{test_id}/runs accepts {"profile":"click-2500"} and returns HTTP 202.
+GET /tests/{test_id}/runs lists the latest ten runs. GET /test-runs/{id} returns
+status, progress, and results with bounded log previews. Full artifacts are saved
+under api-data/generated-executions/{id}. Supported profiles come from GET /cases;
+they must match the report's repository. The selected profile may differ from
+the reporter's original version; the UI shows exact selected versions.
+
+Outcomes distinguish passed, test_failed, inconclusive, environment_failure,
+timed_out, output_limit, and memory_limit. A buggy failure plus fixed pass is
+only a regression signal: inspect the failing assertion and intended behavior.
+Setup/import errors, skipped/empty runs, and timeouts are not successful
+reproductions. Test authors can manipulate their own assertions/output; execution
+is evidence, not an independent oracle proving the bug. Original generated
+artifacts remain immutable; execution records are separate. The same test source
+runs against both environments. Interrupted jobs are marked on API restart.
 
 ### Extraction configuration
 

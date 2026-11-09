@@ -1,6 +1,6 @@
 const byId = id => document.getElementById(id);
 const fields = ['expected_behavior','actual_behavior','reproduction_steps','environment','missing_information','notes'];
-let current = null, revision = 0, aiConfig = null, analyzing = false, generating = false;
+let current = null, revision = 0, aiConfig = null, analyzing = false, generating = false, executionTimer = null;
 async function request(url, options) {
   const response = await fetch(url, options);
   const body = await response.json();
@@ -26,6 +26,7 @@ async function savedReports() {
   if(!reports.length) byId('report-list').textContent='No saved reports yet.';
 }
 async function openReport(id) {
+  clearTimeout(executionTimer);
   const token=++revision;
   const report=await request('/reports/'+id);
   if(token!==revision) return;
@@ -170,7 +171,7 @@ function renderDraft(item) {
   const container=byId('test-drafts');container.replaceChildren();
   const draft=item.payload.draft;
   byId('test-status').textContent=(item.review_is_current?'Based on your saved review.':'Outdated: your saved review has changed. Generate a new draft.')+
-    ` ${item.payload.returned_model || item.payload.model} · ${new Date(item.created_at).toLocaleString()} · Not executed.`;
+    ` ${item.payload.returned_model || item.payload.model} · ${new Date(item.created_at).toLocaleString()} · Draft generated; execution history below.`;
   for(const key of ['assertion_rationale','dependencies','setup_notes','assumptions','missing_information']) {
     if(!draft[key].length)continue;
     const card=element('article','','suggestion');card.append(element('h4',key.replaceAll('_',' ')));
@@ -179,8 +180,9 @@ function renderDraft(item) {
   if(draft.code) {
     const label=element('label','Generated pytest draft');label.htmlFor='generated-code';
     const code=document.createElement('textarea');code.id='generated-code';code.readOnly=true;code.rows=18;code.value=draft.code;
-    const download=element('a','Download unexecuted test','apply-button');download.href='/tests/'+item.id+'/file';download.setAttribute('download','');
+    const download=element('a','Download test source','apply-button');download.href='/tests/'+item.id+'/file';download.setAttribute('download','');
     container.prepend(label,code);container.append(download);
+    configureExecution(item,container,revision).catch(errorMessage);
   } else {
     container.prepend(element('p','More information is needed. Update and save the review, then generate again.'));
   }
@@ -205,3 +207,70 @@ byId('generate-test').addEventListener('click',async()=>{
   } catch(error) {if(token===revision){errorMessage(error);byId('test-status').textContent='Generation failed. Your report and review are unchanged.';}}
   finally {generating=false;byId('analyze').disabled=!aiConfig?.configured || analyzing;updateGenerateButton();}
 });
+
+async function configureExecution(item,container,token) {
+  clearTimeout(executionTimer);
+  const panel=element('section','','ai-panel');
+  panel.append(element('h3','Execute against two releases','small-heading'),
+    element('p','Runs this generated code in separate Docker containers. No network, credentials, or project files are exposed. Inspect the code first. Version pairs are curated; AI dependency suggestions are not installed.','hint'));
+  const label=element('label','Pinned version profile');label.htmlFor='execution-profile';
+  const select=document.createElement('select');select.id='execution-profile';
+  const button=element('button','Run buggy + fixed','primary');button.type='button';button.disabled=true;
+  const status=element('p','Checking Docker…','hint');status.setAttribute('role','status');
+  const history=element('div',''),output=element('div',''),historyButtons=new Map();
+  panel.append(label,select,button,status,history,output);container.append(panel);
+  const [profiles,runtime,runs]=await Promise.all([request('/cases'),request('/execution/config'),request('/tests/'+item.id+'/runs')]);
+  if(token!==revision)return;
+  for(const profile of profiles.filter(p=>current.snapshot.repository.endsWith('/'+p.package.toLowerCase()))) {
+    const option=element('option',`${profile.id}: ${profile.buggy} → ${profile.fixed}`);option.value=profile.id;select.append(option);
+  }
+  const inferred=current.snapshot.repository.split('/')[1]+'-'+current.snapshot.issue_number;
+  if(profiles.some(p=>p.id===inferred))select.value=inferred;
+  button.disabled=!runtime.available || !item.review_is_current;
+  status.textContent=item.review_is_current?runtime.detail:'Review changed. Generate a new draft before running.';
+  async function watch(id) {
+    clearTimeout(executionTimer);
+    try {
+      const run=await request('/test-runs/'+id);
+      if(token!==revision)return;
+      status.textContent=`${run.status} · ${run.progress}`;
+      if(historyButtons.has(id))historyButtons.get(id).textContent=`${run.status} · ${new Date(run.created_at).toLocaleString()}`;
+      output.replaceChildren();
+      if(run.payload.test_sha256)output.append(element('p','Test SHA-256: '+run.payload.test_sha256,'mono'));
+      if(run.payload.regression_signal)output.append(element('p','Regression signal: buggy test failed; fixed release passed. Inspect the assertion and logs before confirming the bug.'));
+      else if(run.status==='completed')output.append(element('p','No clear fail/pass regression signal. Inspect the results below.'));
+      for(const attempt of run.payload.results || []) {
+        const card=element('article','','suggestion');
+        card.append(element('h4',`${attempt.role} · ${attempt.package} ${attempt.version}`),
+          element('p',`${attempt.outcome} · exit ${attempt.exit_code ?? 'unknown'} · ${attempt.duration_seconds}s`));
+        if(attempt.counts)card.append(element('p',JSON.stringify(attempt.counts)));
+        if(attempt.error)card.append(element('p',attempt.error));
+        for(const [name,text] of Object.entries(attempt.logs || {})) {
+          const details=element('details','');details.append(element('summary',name),element('pre',text || '(empty)','source-text'));card.append(details);
+        }
+        output.append(card);
+      }
+      if(run.payload.error)output.append(element('p',run.payload.error));
+      if(['queued','running'].includes(run.status)) {
+        button.disabled=true;executionTimer=setTimeout(()=>watch(id),2000);
+      } else button.disabled=!runtime.available || !item.review_is_current;
+    }catch(error){if(token===revision){errorMessage(error);button.disabled=!runtime.available || !item.review_is_current;}}
+  }
+  for(const run of runs) {
+    const link=element('button',`${run.status} · ${new Date(run.created_at).toLocaleString()}`,'history-item');link.type='button';
+    link.addEventListener('click',()=>watch(run.id));historyButtons.set(run.id,link);history.append(link);
+  }
+  if(runs.length)await watch(runs[0].id);
+  button.addEventListener('click',async()=>{
+    button.disabled=true;byId('intake-error').hidden=true;
+    try {
+      if(fields.some(field=>byId(field).value!==current.review[field]))throw new Error('Save review edits and generate a fresh draft before running.');
+      const run=await request('/tests/'+item.id+'/runs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile:select.value})});
+      if(token===revision){
+        const link=element('button','queued · Just submitted','history-item');link.type='button';
+        link.addEventListener('click',()=>watch(run.id));historyButtons.set(run.id,link);history.prepend(link);
+        await watch(run.id);
+      }
+    }catch(error){errorMessage(error);button.disabled=!runtime.available || !item.review_is_current;}
+  });
+}

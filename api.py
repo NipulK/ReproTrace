@@ -21,13 +21,18 @@ from pydantic import BaseModel, Field
 from workbench import CASES, ROOT
 from reports import ReportInput, ReviewInput, make_snapshot, snapshot_hash
 from extraction import analyze, configuration, ExtractionError
-from generation import generate, review_hash
+from generation import generate, review_hash, validate_draft
+from generated_runner import execute_pair, runtime_status
 
 
 class Submission(BaseModel):
     case: str
     release: Literal["buggy", "fixed", "both"] = "both"
     timeout: int = Field(default=30, ge=1, le=60)
+
+
+class GeneratedRunInput(BaseModel):
+    profile: str
 
 
 def now():
@@ -102,6 +107,12 @@ def create_app(data_dir=None, wheelhouse=None):
                 snapshot_sha256 TEXT NOT NULL, review_sha256 TEXT NOT NULL,
                 saved_review TEXT NOT NULL, status TEXT NOT NULL,
                 payload TEXT NOT NULL, duration_seconds REAL NOT NULL)""")
+            db.execute("""CREATE TABLE IF NOT EXISTS generated_runs (
+                id TEXT PRIMARY KEY, test_id TEXT NOT NULL, report_id TEXT NOT NULL,
+                profile TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                status TEXT NOT NULL, progress TEXT NOT NULL, payload TEXT NOT NULL)""")
+            db.execute("UPDATE generated_runs SET status='interrupted', progress=? "
+                       "WHERE status IN ('queued','running')", ("API process stopped; submit a new run",))
             db.execute("UPDATE jobs SET status='interrupted', updated_at=?, error=? "
                        "WHERE status IN ('queued','running')",
                        (now(), "Previous API process stopped before job completion"))
@@ -272,6 +283,80 @@ def create_app(data_dir=None, wheelhouse=None):
         content = "# AI-generated draft. Not executed or verified. Review before running.\n" + code
         return Response(content, media_type="text/x-python", headers={
             "Content-Disposition": 'attachment; filename="test_reproduction_' + str(test_id) + '.py"'})
+
+    @app.get("/execution/config")
+    def execution_config():
+        return runtime_status()
+
+    def read_generated_run(run_id):
+        with connect() as db:
+            row = db.execute("SELECT * FROM generated_runs WHERE id=?", (str(run_id),)).fetchone()
+        if row is None:
+            raise HTTPException(404, "Generated-test run not found")
+        return dict(row, payload=json.loads(row["payload"]))
+
+    def generated_worker(run_id, code, profile):
+        def progress(message, payload, status="running"):
+            with connect() as db:
+                db.execute("UPDATE generated_runs SET status=?, progress=?, payload=?, updated_at=? WHERE id=?",
+                           (status, message, json.dumps(payload), now(), run_id))
+        try:
+            progress("Starting isolated worker", {})
+            payload = execute_pair(code, profile, data / "generated-executions" / run_id, progress)
+            progress("Both release attempts finished", payload, "completed")
+        except Exception as exc:
+            progress("Worker failed: " + type(exc).__name__, {"error": str(exc)}, "failed")
+
+    @app.post("/tests/{test_id}/runs", status_code=202)
+    def run_generated_test(test_id: UUID, submission: GeneratedRunInput):
+        if submission.profile not in CASES:
+            raise HTTPException(422, "Select a supported pinned version profile")
+        with connect() as db:
+            row = db.execute("SELECT * FROM generated_tests WHERE id=?", (str(test_id),)).fetchone()
+        if row is None:
+            raise HTTPException(404, "Generated test not found")
+        report = read_report(row["report_id"])
+        if row["review_sha256"] != review_hash(report["review"]):
+            raise HTTPException(409, "Review changed; generate a new test before execution")
+        package = CASES[submission.profile][0].lower()
+        if not report["snapshot"]["repository"].endswith("/" + package):
+            raise HTTPException(422, "Version profile does not match the report repository")
+        try:
+            draft = validate_draft(json.loads(row["payload"])["draft"])
+        except (KeyError, ValueError, SyntaxError):
+            raise HTTPException(409, "No valid executable draft exists for this attempt")
+        if row["status"] != "completed" or not draft["code"]:
+            raise HTTPException(409, "This draft needs more information")
+        runtime = runtime_status()
+        if not runtime["available"]:
+            raise HTTPException(503, runtime["detail"])
+        run_id = str(uuid4())
+        with connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            pending = db.execute("SELECT COUNT(*) FROM generated_runs WHERE status IN ('queued','running')").fetchone()[0]
+            if pending >= 10:
+                raise HTTPException(429, "Execution queue is full")
+            db.execute("INSERT INTO generated_runs VALUES (?,?,?,?,?,?,?,?,?)", (
+                run_id, str(test_id), row["report_id"], submission.profile, now(), now(),
+                "queued", "Waiting for worker", "{}"))
+        try:
+            app.state.pool.submit(generated_worker, run_id, draft["code"], submission.profile)
+        except RuntimeError:
+            with connect() as db:
+                db.execute("UPDATE generated_runs SET status='failed', progress='Worker unavailable' WHERE id=?", (run_id,))
+            raise HTTPException(503, "Worker unavailable")
+        return {"id": run_id, "status": "queued", "status_url": "/test-runs/" + run_id}
+
+    @app.get("/tests/{test_id}/runs")
+    def list_generated_runs(test_id: UUID):
+        with connect() as db:
+            rows = db.execute("SELECT id FROM generated_runs WHERE test_id=? ORDER BY created_at DESC LIMIT 10",
+                              (str(test_id),)).fetchall()
+        return [read_generated_run(row["id"]) for row in rows]
+
+    @app.get("/test-runs/{run_id}")
+    def generated_run_result(run_id: UUID):
+        return read_generated_run(run_id)
 
     @app.post("/runs", status_code=202)
     def submit(submission: Submission):
