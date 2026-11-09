@@ -1,6 +1,6 @@
 const byId = id => document.getElementById(id);
 const fields = ['expected_behavior','actual_behavior','reproduction_steps','environment','missing_information','notes'];
-let current = null, revision = 0;
+let current = null, revision = 0, aiConfig = null, analyzing = false;
 async function request(url, options) {
   const response = await fetch(url, options);
   const body = await response.json();
@@ -29,6 +29,7 @@ async function openReport(id) {
   const token=++revision;
   const report=await request('/reports/'+id);
   if(token!==revision) return;
+  byId('suggestions').replaceChildren(); byId('analysis-status').textContent='';
   current=report; window.history.replaceState(null,'','#report='+id);
   byId('report-empty').hidden=true; byId('report-detail').hidden=false;
   byId('snapshot-title').textContent=report.snapshot.title;
@@ -39,6 +40,7 @@ async function openReport(id) {
   if(report.snapshot.issue_url) link.href=report.snapshot.issue_url; else link.removeAttribute('href');
   for(const field of fields) byId(field).value=report.review[field];
   byId('review-status').textContent=report.reviewed_at?'Review saved '+new Date(report.reviewed_at).toLocaleString():'Review not saved yet.';
+  await loadAnalyses(id,token);
 }
 byId('source').addEventListener('change',sourceChanged);
 byId('intake-form').addEventListener('submit',async event=>{
@@ -63,4 +65,94 @@ byId('review-form').addEventListener('submit',async event=>{
   } catch(error) {errorMessage(error);} finally {byId('save-review').disabled=false;}
 });
 sourceChanged();
+loadConfig();
 (async()=>{try{await savedReports();const match=location.hash.match(/^#report=([a-f0-9-]{36})$/);if(match)await openReport(match[1]);}catch(error){errorMessage(error);}})();
+
+async function loadConfig() {
+  try {
+    aiConfig=await request('/ai/config');
+    byId('ai-config').textContent=aiConfig.configured
+      ? `OpenAI · ${aiConfig.model}`
+      : 'OpenAI is not configured. Add OPENAI_API_KEY to your local .env and restart the server.';
+    byId('analyze').disabled=!aiConfig.configured || analyzing;
+  } catch(error) {byId('ai-config').textContent='Could not read AI configuration.';}
+}
+function element(tag,text,className) {
+  const item=document.createElement(tag);item.textContent=text;
+  if(className)item.className=className;return item;
+}
+function applySuggestion(field,value) {
+  byId(field).value=value;
+  byId('review-status').textContent='AI suggestion applied to the draft. Review it, then click Save review.';
+}
+function renderAnalysis(analysis) {
+  byId('suggestions').replaceChildren();
+  if(!current || analysis.snapshot_sha256!==current.snapshot_sha256) {
+    byId('analysis-status').textContent='Analysis belongs to a different snapshot.';return;
+  }
+  const payload=analysis.payload;
+  byId('analysis-status').textContent=`Suggestions from ${payload.returned_model || payload.model} · ${new Date(analysis.created_at).toLocaleString()} · ${analysis.duration_seconds}s`;
+  for(const field of ['expected_behavior','actual_behavior','reproduction_steps','environment']) {
+    const suggestion=payload.suggestions[field];
+    const card=element('article','','suggestion');
+    card.append(element('h4',field.replaceAll('_',' ')));
+    if(suggestion.value===null) {
+      card.append(element('p','Unknown — the report does not provide supported details.','hint'));
+    } else {
+      card.append(element('p',suggestion.value));
+      for(const evidence of suggestion.evidence) {
+        card.append(element('small',`Source: ${evidence.source} · exact quote checked`),element('blockquote',evidence.quote));
+      }
+      const button=element('button','Apply to '+field.replaceAll('_',' '),'apply-button');
+      button.type='button';
+      button.addEventListener('click',()=>{
+        const old=byId(field).value;
+        if(old.trim() && old!==suggestion.value && button.dataset.replace!=='yes') {
+          button.textContent='Replace existing draft text? Click again to replace';
+          button.dataset.replace='yes';return;
+        }
+        applySuggestion(field,suggestion.value);button.textContent='Applied to draft';button.dataset.replace='';
+      });
+      card.append(button);
+    }
+    byId('suggestions').append(card);
+  }
+  const questions=payload.suggestions.missing_information;
+  if(questions.length) {
+    const card=element('article','','suggestion');card.append(element('h4','Suggested clarification questions'));
+    const list=element('ul','');for(const question of questions)list.append(element('li',question));card.append(list);
+    const button=element('button','Append questions to missing information','apply-button');button.type='button';
+    button.addEventListener('click',()=>{
+      const old=byId('missing_information').value;
+      const fresh=questions.filter(question=>!old.includes(question));
+      applySuggestion('missing_information',[old,...fresh].filter(Boolean).join('\n'));
+      button.textContent='Questions added to draft';
+    });card.append(button);byId('suggestions').append(card);
+  }
+  if(payload.suggestions.warnings.length) {
+    const card=element('article','','suggestion');card.append(element('h4','Model-noted limitations'));
+    for(const warning of payload.suggestions.warnings)card.append(element('p',warning));
+    byId('suggestions').append(card);
+  }
+}
+async function loadAnalyses(id,token) {
+  const analyses=await request('/reports/'+id+'/analyses');
+  if(token!==revision)return;
+  const latest=analyses.find(analysis=>analysis.status==='completed');
+  if(latest)renderAnalysis(latest);
+  if(analyses[0]?.status==='failed') {
+    byId('analysis-status').textContent='Latest attempt failed: '+analyses[0].payload.error+(latest?' Earlier suggestions are shown below.':'');
+  }
+}
+byId('analyze').addEventListener('click',async()=>{
+  if(!current || analyzing)return;
+  const id=current.id,token=revision;
+  analyzing=true;byId('analyze').disabled=true;byId('intake-error').hidden=true;
+  byId('analysis-status').textContent='Analyzing the saved report with OpenAI… This can take up to 90 seconds.';
+  try {
+    const analysis=await request('/reports/'+id+'/analyze',{method:'POST'});
+    if(token===revision && current.id===id)renderAnalysis(analysis);
+  } catch(error) {
+    if(token===revision) {errorMessage(error);byId('analysis-status').textContent='Analysis failed. Your existing review is unchanged.';}
+  } finally {analyzing=false;byId('analyze').disabled=!aiConfig?.configured;}
+});

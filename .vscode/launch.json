@@ -8,8 +8,15 @@
       "module": "uvicorn",
       "python": "${workspaceFolder}/.api-venv/bin/python",
       "cwd": "${workspaceFolder}",
-      "args": ["api:app", "--host", "127.0.0.1", "--port", "8000"],
-      "console": "integratedTerminal"
+      "args": [
+        "api:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8000"
+      ],
+      "console": "integratedTerminal",
+      "envFile": "${workspaceFolder}/.env"
     }
   ]
 }

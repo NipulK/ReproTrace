@@ -2,6 +2,51 @@
 
 ## FastAPI service
 
+### OpenAI-assisted extraction
+
+1. Install requirements-api.txt (includes python-dotenv).
+2. Copy .env.example to .env if .env does not already exist.
+3. Put your own OpenAI API key in OPENAI_API_KEY in that local file. Do not
+   paste keys in chat or commit .env. WORKBENCH_AI_MODEL defaults to
+   gpt-4o-mini; select another Responses/structured-output-compatible model
+   if needed for your account.
+4. Start the server from this directory:
+
+```sh
+.api-venv/bin/python -m uvicorn api:app --env-file .env --host 127.0.0.1 --port 8000
+```
+
+VS Code's Workbench API debug configuration also loads .env. Restart the
+existing server after changing credentials. GET /ai/config reports key presence
+and model name, never the key. Key presence does not prove credentials or billing
+are valid. OpenAI API usage may incur charges.
+
+Open a saved report at /intake and click Analyze report. This sends only the
+saved title and body to OpenAI, not manual review notes, and requests store=false.
+No repository fetch, tool execution, code execution, or automatic patching occurs.
+The API uses Responses structured outputs and validates results with Pydantic:
+https://developers.openai.com/api/docs/guides/structured-outputs
+
+Each populated extracted field needs verbatim title/body evidence. Unknown
+fields stay null. Exact quote matching prevents invented citations; it does not
+prove that an interpretation is correct. Read the suggestion and its quote before
+applying it. Applying fills a draft field only. Replacing nonempty draft text
+requires a second click; Save review persists your chosen edits. Clarification
+questions are appended explicitly. Source snapshots and existing saved reviews
+are never changed by analysis itself.
+
+POST /reports/{id}/analyze returns a saved analysis, or a clear provider error.
+GET /reports/{id}/analyses returns the latest ten attempts, including failures.
+Successful attempts store suggestions, prompt version, model/response identifiers,
+usage metadata, duration, and snapshot hash. Failed attempts store a sanitized
+error. Missing-key requests return 503 without contacting OpenAI. One analysis
+runs at a time per API process; the request waits for it, with a 90-second HTTP
+timeout. This local MVP does not resume in-flight analysis after a crash.
+
+Tests use mocked OpenAI responses and do not incur API charges. A live extraction
+must be checked separately after configuring a valid key; no placeholder output
+is shown as real AI analysis.
+
 ### Report intake
 
 Open http://127.0.0.1:8000/intake to paste a report or import a public issue

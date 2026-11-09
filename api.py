@@ -8,6 +8,8 @@ from pathlib import Path
 import sqlite3
 import subprocess
 import sys
+import threading
+import time
 from typing import Literal
 from uuid import UUID, uuid4
 
@@ -18,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from workbench import CASES, ROOT
 from reports import ReportInput, ReviewInput, make_snapshot, snapshot_hash
+from extraction import analyze, configuration, ExtractionError
 
 
 class Submission(BaseModel):
@@ -33,6 +36,7 @@ def now():
 def create_app(data_dir=None, wheelhouse=None):
     data = Path(data_dir or os.environ.get("WORKBENCH_DATA", ROOT / "api-data")).resolve()
     wheels = wheelhouse or os.environ.get("WORKBENCH_WHEELHOUSE")
+    analysis_slot = threading.BoundedSemaphore(1)
 
     def connect():
         connection = sqlite3.connect(str(data / "jobs.sqlite3"), timeout=30)
@@ -88,6 +92,10 @@ def create_app(data_dir=None, wheelhouse=None):
                 id TEXT PRIMARY KEY, captured_at TEXT NOT NULL,
                 snapshot TEXT NOT NULL, snapshot_sha256 TEXT NOT NULL,
                 review TEXT NOT NULL, reviewed_at TEXT)""")
+            db.execute("""CREATE TABLE IF NOT EXISTS analyses (
+                id TEXT PRIMARY KEY, report_id TEXT NOT NULL, created_at TEXT NOT NULL,
+                snapshot_sha256 TEXT NOT NULL, status TEXT NOT NULL,
+                payload TEXT NOT NULL, duration_seconds REAL NOT NULL)""")
             db.execute("UPDATE jobs SET status='interrupted', updated_at=?, error=? "
                        "WHERE status IN ('queued','running')",
                        (now(), "Previous API process stopped before job completion"))
@@ -157,6 +165,45 @@ def create_app(data_dir=None, wheelhouse=None):
             db.execute("UPDATE reports SET review=?, reviewed_at=? WHERE id=?",
                        (review.model_dump_json(), now(), str(report_id)))
         return read_report(report_id)
+
+    @app.get("/ai/config")
+    def ai_configuration():
+        return configuration()
+
+    @app.get("/reports/{report_id}/analyses")
+    def report_analyses(report_id: UUID):
+        read_report(report_id)
+        with connect() as db:
+            rows = db.execute("SELECT * FROM analyses WHERE report_id=? "
+                              "ORDER BY created_at DESC LIMIT 10", (str(report_id),)).fetchall()
+        return [dict(row, payload=json.loads(row["payload"])) for row in rows]
+
+    @app.post("/reports/{report_id}/analyze", status_code=201)
+    def analyze_report(report_id: UUID):
+        report = read_report(report_id)
+        if not configuration()["configured"]:
+            raise HTTPException(503, "Set OPENAI_API_KEY in the server environment, then restart the API.")
+        if not analysis_slot.acquire(blocking=False):
+            raise HTTPException(429, "Another report is being analyzed. Wait for it to finish.")
+        analysis_id, started, created = str(uuid4()), time.monotonic(), now()
+        error = None
+        try:
+            payload = analyze(report["snapshot"])
+            status = "completed"
+        except ExtractionError as exc:
+            payload, status, error = {"error": str(exc), **configuration()}, "failed", exc
+        finally:
+            analysis_slot.release()
+        duration = round(time.monotonic() - started, 3)
+        with connect() as db:
+            db.execute("INSERT INTO analyses VALUES (?,?,?,?,?,?,?)", (
+                analysis_id, str(report_id), created, report["snapshot_sha256"],
+                status, json.dumps(payload), duration))
+        if error:
+            raise HTTPException(error.status_code, str(error))
+        return {"id": analysis_id, "report_id": str(report_id), "created_at": created,
+                "snapshot_sha256": report["snapshot_sha256"], "status": status,
+                "payload": payload, "duration_seconds": duration}
 
     @app.post("/runs", status_code=202)
     def submit(submission: Submission):

@@ -4,3 +4,6 @@ runs/
 wheelhouse/
 .api-venv/
 api-data/
+.env
+.env.*
+!.env.example
