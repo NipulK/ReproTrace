@@ -1,0 +1,134 @@
+{
+  "analyze": {
+    "status_code": 201,
+    "body": {
+      "id": "7a08c5dc-1953-4a34-9993-c4fdc0fe4cce",
+      "report_id": "877b7929-53eb-424b-844d-8b691e262738",
+      "created_at": "2026-11-09T10:11:45.686721+00:00",
+      "snapshot_sha256": "127e798a826ef657bfdaaa6e567958841bb27f0829741fe93fe0d843dc44a000",
+      "status": "completed",
+      "payload": {
+        "suggestions": {
+          "expected_behavior": {
+            "value": "Expected to see a default displayed.",
+            "evidence": [
+              {
+                "source": "body",
+                "quote": "Expected to see a default displayed."
+              }
+            ]
+          },
+          "actual_behavior": {
+            "value": "If an option has a default value of \"\", the show_default option does not display anything.",
+            "evidence": [
+              {
+                "source": "body",
+                "quote": "If an option has a default value of `\"\"`, the `show_default` option does not display anything."
+              }
+            ]
+          },
+          "reproduction_steps": {
+            "value": "import click\n\n@click.group()\ndef test_cli() -> None:\n    pass \n\n\n@test_cli.command(help=\"Test CLI\")\n@click.option(\"--test_value\", type=str, default=\"\", show_default=True)\ndef test_function(\n    test_value: str\n) -> None:\n    print(test_value)\n\n\n@click.group()\ndef cli() -> None:\n    pass\n\n\ncli.add_command(test_cli)\ncli()",
+            "evidence": [
+              {
+                "source": "body",
+                "quote": "import click\r\n\r\n@click.group()\r\ndef test_cli() -> None:\r\n    pass \r\n\r\n\r\n@test_cli.command(help=\"Test CLI\")\r\n@click.option(\"--test_value\", type=str, default=\"\", show_default=True)\r\ndef test_function(\r\n    test_value: str\r\n) -> None:\r\n    print(test_value)\r\n\r\n\r\n@click.group()\r\ndef cli() -> None:\r\n    pass\r\n\r\n\r\ncli.add_command(test_cli)\r\ncli()"
+              }
+            ]
+          },
+          "environment": {
+            "value": "Python version: 3.11.3, Click version: 8.0.3",
+            "evidence": [
+              {
+                "source": "body",
+                "quote": "- Python version: 3.11.3\r\n- Click version: 8.0.3"
+              }
+            ]
+          },
+          "missing_information": [],
+          "warnings": []
+        },
+        "provider": "gemini",
+        "model": "gemini-3.5-flash-lite",
+        "returned_model": "gemini-3.5-flash-lite",
+        "response_id": "Y5zxatTwMfqBg8UP9-_VwAo",
+        "usage": {
+          "promptTokenCount": 586,
+          "candidatesTokenCount": 605,
+          "totalTokenCount": 1191,
+          "promptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 586
+            }
+          ],
+          "serviceTier": "standard"
+        },
+        "prompt_version": "report-extraction-v1"
+      },
+      "duration_seconds": 7.208
+    }
+  },
+  "tests": {
+    "status_code": 201,
+    "body": {
+      "id": "0cebd5b2-9bf9-4675-a671-179a92386402",
+      "report_id": "877b7929-53eb-424b-844d-8b691e262738",
+      "created_at": "2026-11-09T10:11:52.904492+00:00",
+      "snapshot_sha256": "127e798a826ef657bfdaaa6e567958841bb27f0829741fe93fe0d843dc44a000",
+      "review_sha256": "7bf518b7858f233ec933af8ad8923a4257abfcd7c8598c0278c095a3a5e3e1f8",
+      "saved_review": {
+        "expected_behavior": "The help output should display the empty-string default when show_default=True.",
+        "actual_behavior": "The option default is omitted from the help output.",
+        "reproduction_steps": "",
+        "environment": "Reported: Python 3.11.3; Click 8.0.3.",
+        "missing_information": "",
+        "notes": ""
+      },
+      "status": "completed",
+      "payload": {
+        "draft": {
+          "status": "draft",
+          "code": "import click\nfrom click.testing import CliRunner\n\ndef test_empty_string_default_show_default():\n    @click.command()\n    @click.option(\"--test_value\", type=str, default=\"\", show_default=True)\n    def test_function(test_value: str) -> None:\n        pass\n\n    runner = CliRunner()\n    result = runner.invoke(test_function, [\"--help\"])\n    assert result.exit_code == 0\n    assert 'default: \"\"' in result.output",
+          "assertion_rationale": [
+            "Asserts that the command executes successfully with exit code 0.",
+            "Asserts that the help output explicitly displays the default value as an empty string representation (default: \"\") when show_default=True is set."
+          ],
+          "dependencies": [
+            "click==8.0.3",
+            "pytest"
+          ],
+          "setup_notes": [
+            "Install pytest and click version 8.0.3 in the test environment."
+          ],
+          "assumptions": [
+            "Click displays string defaults wrapped in quotes or explicitly shows empty string defaults as \"\" in the help text.",
+            "CliRunner from click.testing is available and functions as expected."
+          ],
+          "missing_information": []
+        },
+        "provider": "gemini",
+        "model": "gemini-3.5-flash-lite",
+        "returned_model": "gemini-3.5-flash-lite",
+        "response_id": "a5zxauuoB4yR3LUPyMGQsAs",
+        "usage": {
+          "promptTokenCount": 752,
+          "candidatesTokenCount": 324,
+          "totalTokenCount": 1076,
+          "promptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 752
+            }
+          ],
+          "serviceTier": "standard"
+        },
+        "prompt_version": "reproduction-generation-v1",
+        "executed": false,
+        "validation": "syntax_and_structure_checked"
+      },
+      "duration_seconds": 7.86,
+      "review_is_current": true
+    }
+  }
+}

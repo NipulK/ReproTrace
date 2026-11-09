@@ -1,14 +1,14 @@
-# Five manually verified reproduction cases
+# ReproTrace — Bug Reproduction Workbench
 
 ## FastAPI service
 
-### OpenAI-assisted extraction
+### AI providers
 
 ### Generate reproduction tests from a saved review
 
 After saving expected and actual behavior in the report review, click
 Generate pytest draft. Unsaved review edits must be saved first. The request
-sends the original title/body, repository name, and saved review to OpenAI.
+sends the original title/body, repository name, and saved review to the selected provider.
 It does not fetch repository code, inspect fixes, install packages, or execute
 the generated code. API availability and version assumptions must be reviewed.
 
@@ -30,27 +30,51 @@ code when the reviewed report is insufficient.
 ### Extraction configuration
 
 1. Install requirements-api.txt (includes python-dotenv).
-2. Copy .env.example to .env if .env does not already exist.
-3. Put your own OpenAI API key in OPENAI_API_KEY in that local file. Do not
-   paste keys in chat or commit .env. WORKBENCH_AI_MODEL defaults to
-   gpt-4o-mini; select another Responses/structured-output-compatible model
-   if needed for your account.
+2. Copy .env.example to .env only if .env does not already exist.
+3. For Gemini, obtain a key at https://aistudio.google.com/apikey and save:
+
+```dotenv
+WORKBENCH_AI_PROVIDER=gemini
+GEMINI_API_KEY=your_key_here
+GEMINI_MODEL=gemini-3.5-flash-lite
+```
+
+In AI Studio, sign in, create/select a project, and create an API key. Use a
+project showing Free tier for free-tier testing. Do not enable billing merely to
+use this MVP. Availability and quotas depend on your account and region. API
+requests use the selected project's billing tier: the app cannot enforce or
+verify that it is free. No automatic paid-provider fallback occurs.
+
+Google currently lists Gemini 3.5 Flash-Lite text input/output as free of charge
+on its free tier: https://ai.google.dev/gemini-api/docs/pricing
+Free-tier data may be used to improve Google products; use public/non-sensitive
+reports and review Google's terms. Keys stay server-side and are never returned
+by GET /ai/config. Gemini credentials are sent in headers, not request URLs.
+
+To use OpenAI instead, set WORKBENCH_AI_PROVIDER=openai, OPENAI_API_KEY, and
+OPENAI_MODEL=gpt-4o-mini. WORKBENCH_AI_MODEL, if explicitly set, overrides either
+provider's model; remove that legacy setting when switching providers. The code
+uses OpenAI by default when no provider is selected, for backward compatibility;
+the example and project .env explicitly select Gemini.
+
 4. Start the server from this directory:
 
 ```sh
 .api-venv/bin/python -m uvicorn api:app --env-file .env --host 127.0.0.1 --port 8000
 ```
 
-VS Code's Workbench API debug configuration also loads .env. Restart the
-existing server after changing credentials. GET /ai/config reports key presence
-and model name, never the key. Key presence does not prove credentials or billing
-are valid. OpenAI API usage may incur charges.
+VS Code's Workbench API configuration also loads .env. Restart after changing
+credentials. GET /ai/config reports selected provider, model, and key presence,
+not whether credentials are valid or free quota is available.
 
 Open a saved report at /intake and click Analyze report. This sends only the
-saved title and body to OpenAI, not manual review notes, and requests store=false.
-No repository fetch, tool execution, code execution, or automatic patching occurs.
-The API uses Responses structured outputs and validates results with Pydantic:
+saved title/body to the selected provider, not manual review notes. OpenAI uses
+Responses with store=false; Gemini uses generateContent with a JSON schema.
+No repository fetch, tool execution, or automatic patching occurs. Output is
+validated with the same Pydantic and evidence checks for either provider.
+Provider documentation:
 https://developers.openai.com/api/docs/guides/structured-outputs
+https://ai.google.dev/gemini-api/docs/structured-output
 
 Each populated extracted field needs verbatim title/body evidence. Unknown
 fields stay null. Exact quote matching prevents invented citations; it does not
@@ -64,11 +88,11 @@ POST /reports/{id}/analyze returns a saved analysis, or a clear provider error.
 GET /reports/{id}/analyses returns the latest ten attempts, including failures.
 Successful attempts store suggestions, prompt version, model/response identifiers,
 usage metadata, duration, and snapshot hash. Failed attempts store a sanitized
-error. Missing-key requests return 503 without contacting OpenAI. One analysis
+error. Missing-key requests return 503 without contacting the provider. One analysis
 runs at a time per API process; the request waits for it, with a 90-second HTTP
 timeout. This local MVP does not resume in-flight analysis after a crash.
 
-Tests use mocked OpenAI responses and do not incur API charges. A live extraction
+Tests use mocked OpenAI and Gemini responses and do not incur API charges. A live extraction
 must be checked separately after configuring a valid key; no placeholder output
 is shown as real AI analysis.
 
