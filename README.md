@@ -4,6 +4,31 @@
 
 ### OpenAI-assisted extraction
 
+### Generate reproduction tests from a saved review
+
+After saving expected and actual behavior in the report review, click
+Generate pytest draft. Unsaved review edits must be saved first. The request
+sends the original title/body, repository name, and saved review to OpenAI.
+It does not fetch repository code, inspect fixes, install packages, or execute
+the generated code. API availability and version assumptions must be reviewed.
+
+POST /reports/{id}/tests generates and stores a draft or clarification questions.
+GET /reports/{id}/tests lists the latest ten attempts. GET /tests/{id}/file
+downloads a generated .py draft. Each record preserves the source snapshot
+hash, complete saved review, review hash, model metadata, and prompt version.
+Drafts become marked outdated when the saved review changes. A provider failure
+is recorded separately and does not replace a previously successful draft.
+
+Drafts require valid Python syntax, a top-level test_ function and an assert.
+A restrictive import/call filter rejects some obvious side effects. This is NOT
+a sandbox, security guarantee, or validation of correctness: generated drafts
+remain unexecuted and must not be passed to the trusted-fixture CLI. An isolated
+execution worker and human-reviewed test oracle are separate future milestones.
+No endpoint runs generated code. A model can return needs_information with no
+code when the reviewed report is insufficient.
+
+### Extraction configuration
+
 1. Install requirements-api.txt (includes python-dotenv).
 2. Copy .env.example to .env if .env does not already exist.
 3. Put your own OpenAI API key in OPENAI_API_KEY in that local file. Do not

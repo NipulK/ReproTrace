@@ -14,13 +14,14 @@ from typing import Literal
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from workbench import CASES, ROOT
 from reports import ReportInput, ReviewInput, make_snapshot, snapshot_hash
 from extraction import analyze, configuration, ExtractionError
+from generation import generate, review_hash
 
 
 class Submission(BaseModel):
@@ -95,6 +96,11 @@ def create_app(data_dir=None, wheelhouse=None):
             db.execute("""CREATE TABLE IF NOT EXISTS analyses (
                 id TEXT PRIMARY KEY, report_id TEXT NOT NULL, created_at TEXT NOT NULL,
                 snapshot_sha256 TEXT NOT NULL, status TEXT NOT NULL,
+                payload TEXT NOT NULL, duration_seconds REAL NOT NULL)""")
+            db.execute("""CREATE TABLE IF NOT EXISTS generated_tests (
+                id TEXT PRIMARY KEY, report_id TEXT NOT NULL, created_at TEXT NOT NULL,
+                snapshot_sha256 TEXT NOT NULL, review_sha256 TEXT NOT NULL,
+                saved_review TEXT NOT NULL, status TEXT NOT NULL,
                 payload TEXT NOT NULL, duration_seconds REAL NOT NULL)""")
             db.execute("UPDATE jobs SET status='interrupted', updated_at=?, error=? "
                        "WHERE status IN ('queued','running')",
@@ -204,6 +210,68 @@ def create_app(data_dir=None, wheelhouse=None):
         return {"id": analysis_id, "report_id": str(report_id), "created_at": created,
                 "snapshot_sha256": report["snapshot_sha256"], "status": status,
                 "payload": payload, "duration_seconds": duration}
+
+    @app.get("/reports/{report_id}/tests")
+    def generated_tests(report_id: UUID):
+        report = read_report(report_id)
+        with connect() as db:
+            rows = db.execute("SELECT * FROM generated_tests WHERE report_id=? "
+                              "ORDER BY created_at DESC LIMIT 10", (str(report_id),)).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["payload"] = json.loads(item["payload"])
+            item["saved_review"] = json.loads(item["saved_review"])
+            item["review_is_current"] = item["review_sha256"] == review_hash(report["review"])
+            result.append(item)
+        return result
+
+    @app.post("/reports/{report_id}/tests", status_code=201)
+    def generate_test(report_id: UUID):
+        report = read_report(report_id)
+        if not report["reviewed_at"] or not all(report["review"][key].strip()
+                for key in ("expected_behavior", "actual_behavior")):
+            raise HTTPException(409, "Save a review with expected and actual behavior before generating a test.")
+        if not configuration()["configured"]:
+            raise HTTPException(503, "Configure OPENAI_API_KEY and restart the API.")
+        if not analysis_slot.acquire(blocking=False):
+            raise HTTPException(429, "Another AI request is running. Wait for it to finish.")
+        test_id, started, created = str(uuid4()), time.monotonic(), now()
+        error = None
+        try:
+            payload = generate(report)
+            status = "completed"
+        except ExtractionError as exc:
+            payload, status, error = {"error": str(exc)}, "failed", exc
+        finally:
+            analysis_slot.release()
+        duration, digest = round(time.monotonic() - started, 3), review_hash(report["review"])
+        with connect() as db:
+            db.execute("INSERT INTO generated_tests VALUES (?,?,?,?,?,?,?,?,?)", (
+                test_id, str(report_id), created, report["snapshot_sha256"], digest,
+                json.dumps(report["review"]), status, json.dumps(payload), duration))
+        if error:
+            raise HTTPException(error.status_code, str(error))
+        latest = read_report(report_id)
+        return {"id": test_id, "report_id": str(report_id), "created_at": created,
+                "snapshot_sha256": report["snapshot_sha256"], "review_sha256": digest,
+                "saved_review": report["review"], "status": status, "payload": payload,
+                "duration_seconds": duration,
+                "review_is_current": digest == review_hash(latest["review"])}
+
+    @app.get("/tests/{test_id}/file")
+    def download_generated_test(test_id: UUID):
+        with connect() as db:
+            row = db.execute("SELECT payload, status FROM generated_tests WHERE id=?", (str(test_id),)).fetchone()
+        if row is None:
+            raise HTTPException(404, "Generated test not found")
+        payload = json.loads(row["payload"])
+        code = payload.get("draft", {}).get("code")
+        if row["status"] != "completed" or not code:
+            raise HTTPException(409, "This attempt has no downloadable test")
+        content = "# AI-generated draft. Not executed or verified. Review before running.\n" + code
+        return Response(content, media_type="text/x-python", headers={
+            "Content-Disposition": 'attachment; filename="test_reproduction_' + str(test_id) + '.py"'})
 
     @app.post("/runs", status_code=202)
     def submit(submission: Submission):

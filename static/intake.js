@@ -1,6 +1,6 @@
 const byId = id => document.getElementById(id);
 const fields = ['expected_behavior','actual_behavior','reproduction_steps','environment','missing_information','notes'];
-let current = null, revision = 0, aiConfig = null, analyzing = false;
+let current = null, revision = 0, aiConfig = null, analyzing = false, generating = false;
 async function request(url, options) {
   const response = await fetch(url, options);
   const body = await response.json();
@@ -30,6 +30,7 @@ async function openReport(id) {
   const report=await request('/reports/'+id);
   if(token!==revision) return;
   byId('suggestions').replaceChildren(); byId('analysis-status').textContent='';
+  byId('test-drafts').replaceChildren(); byId('test-status').textContent='';
   current=report; window.history.replaceState(null,'','#report='+id);
   byId('report-empty').hidden=true; byId('report-detail').hidden=false;
   byId('snapshot-title').textContent=report.snapshot.title;
@@ -41,6 +42,8 @@ async function openReport(id) {
   for(const field of fields) byId(field).value=report.review[field];
   byId('review-status').textContent=report.reviewed_at?'Review saved '+new Date(report.reviewed_at).toLocaleString():'Review not saved yet.';
   await loadAnalyses(id,token);
+  await loadDrafts(id,token);
+  updateGenerateButton();
 }
 byId('source').addEventListener('change',sourceChanged);
 byId('intake-form').addEventListener('submit',async event=>{
@@ -60,7 +63,7 @@ byId('review-form').addEventListener('submit',async event=>{
   try {
     const review=Object.fromEntries(fields.map(field=>[field,byId(field).value]));
     const result=await request('/reports/'+id+'/review',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(review)});
-    if(current.id===id) {current=result;byId('review-status').textContent='Review saved '+new Date(result.reviewed_at).toLocaleString();}
+    if(current.id===id) {current=result;byId('review-status').textContent='Review saved '+new Date(result.reviewed_at).toLocaleString();updateGenerateButton();await loadDrafts(id,revision);}
     await savedReports();
   } catch(error) {errorMessage(error);} finally {byId('save-review').disabled=false;}
 });
@@ -74,7 +77,8 @@ async function loadConfig() {
     byId('ai-config').textContent=aiConfig.configured
       ? `OpenAI · ${aiConfig.model}`
       : 'OpenAI is not configured. Add OPENAI_API_KEY to your local .env and restart the server.';
-    byId('analyze').disabled=!aiConfig.configured || analyzing;
+    byId('analyze').disabled=!aiConfig.configured || analyzing || generating;
+    updateGenerateButton();
   } catch(error) {byId('ai-config').textContent='Could not read AI configuration.';}
 }
 function element(tag,text,className) {
@@ -147,12 +151,56 @@ async function loadAnalyses(id,token) {
 byId('analyze').addEventListener('click',async()=>{
   if(!current || analyzing)return;
   const id=current.id,token=revision;
-  analyzing=true;byId('analyze').disabled=true;byId('intake-error').hidden=true;
+  analyzing=true;byId('analyze').disabled=true;updateGenerateButton();byId('intake-error').hidden=true;
   byId('analysis-status').textContent='Analyzing the saved report with OpenAI… This can take up to 90 seconds.';
   try {
     const analysis=await request('/reports/'+id+'/analyze',{method:'POST'});
     if(token===revision && current.id===id)renderAnalysis(analysis);
   } catch(error) {
     if(token===revision) {errorMessage(error);byId('analysis-status').textContent='Analysis failed. Your existing review is unchanged.';}
-  } finally {analyzing=false;byId('analyze').disabled=!aiConfig?.configured;}
+  } finally {analyzing=false;byId('analyze').disabled=!aiConfig?.configured;updateGenerateButton();}
+});
+
+function updateGenerateButton() {
+  const ready=current?.reviewed_at && current.review.expected_behavior.trim() && current.review.actual_behavior.trim();
+  byId('generate-test').disabled=!aiConfig?.configured || !ready || analyzing || generating;
+}
+function renderDraft(item) {
+  const container=byId('test-drafts');container.replaceChildren();
+  const draft=item.payload.draft;
+  byId('test-status').textContent=(item.review_is_current?'Based on your saved review.':'Outdated: your saved review has changed. Generate a new draft.')+
+    ` ${item.payload.returned_model || item.payload.model} · ${new Date(item.created_at).toLocaleString()} · Not executed.`;
+  for(const key of ['assertion_rationale','dependencies','setup_notes','assumptions','missing_information']) {
+    if(!draft[key].length)continue;
+    const card=element('article','','suggestion');card.append(element('h4',key.replaceAll('_',' ')));
+    for(const text of draft[key])card.append(element('p',text));container.append(card);
+  }
+  if(draft.code) {
+    const label=element('label','Generated pytest draft');label.htmlFor='generated-code';
+    const code=document.createElement('textarea');code.id='generated-code';code.readOnly=true;code.rows=18;code.value=draft.code;
+    const download=element('a','Download unexecuted test','apply-button');download.href='/tests/'+item.id+'/file';download.setAttribute('download','');
+    container.prepend(label,code);container.append(download);
+  } else {
+    container.prepend(element('p','More information is needed. Update and save the review, then generate again.'));
+  }
+}
+async function loadDrafts(id,token) {
+  const drafts=await request('/reports/'+id+'/tests');
+  if(token!==revision)return;
+  const completed=drafts.find(item=>item.status==='completed');
+  if(completed)renderDraft(completed);
+  if(drafts[0]?.status==='failed')byId('test-status').textContent='Latest generation failed: '+drafts[0].payload.error+(completed?' Earlier draft shown below.':'');
+}
+byId('generate-test').addEventListener('click',async()=>{
+  if(!current || generating)return;
+  if(fields.some(field=>byId(field).value!==current.review[field])) {
+    byId('test-status').textContent='You have unsaved review edits. Click Save review before generating.';return;
+  }
+  const id=current.id,token=revision;generating=true;updateGenerateButton();byId('analyze').disabled=true;
+  byId('intake-error').hidden=true;byId('test-status').textContent='Generating a draft from the saved review…';
+  try {
+    const item=await request('/reports/'+id+'/tests',{method:'POST'});
+    if(token===revision)renderDraft(item);
+  } catch(error) {if(token===revision){errorMessage(error);byId('test-status').textContent='Generation failed. Your report and review are unchanged.';}}
+  finally {generating=false;byId('analyze').disabled=!aiConfig?.configured || analyzing;updateGenerateButton();}
 });
